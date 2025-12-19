@@ -543,25 +543,29 @@ def render_overview_tab(data, analysis_results):
     if analysis_results.get('seasonality', {}).get('yoy_metrics'):
         yoy = analysis_results['seasonality']['yoy_metrics']
 
-        st.markdown("#### Year-over-Year Change")
+        st.markdown("#### Year-over-Year Comparison")
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
             if 'clicks' in yoy:
                 change = yoy['clicks']['pct_change']
+                prev_clicks = yoy['clicks'].get('previous', 0)
                 st.metric(
-                    "Clicks YoY",
-                    format_number(yoy['clicks']['current']),
-                    f"{change:+.1f}%"
+                    "Clicks (Last Year)",
+                    format_number(prev_clicks),
+                    f"{change:+.1f}% now",
+                    delta_color="normal"
                 )
 
         with col2:
             if 'impressions' in yoy:
                 change = yoy['impressions']['pct_change']
+                prev_impressions = yoy['impressions'].get('previous', 0)
                 st.metric(
-                    "Impressions YoY",
-                    format_number(yoy['impressions']['current']),
-                    f"{change:+.1f}%"
+                    "Impressions (Last Year)",
+                    format_number(prev_impressions),
+                    f"{change:+.1f}% now",
+                    delta_color="normal"
                 )
 
     # Performance chart
@@ -1088,14 +1092,20 @@ def render_diagnostics_tab(analysis_results):
     elif engagement.get('status') not in ['no_data', 'unknown']:
         correlations = engagement.get('correlations', {})
 
-        if correlations:
+        if correlations and len(correlations) > 0:
             st.markdown("**Correlation between GA4 Engagement and GSC Position:**")
-            corr_cols = st.columns(len(correlations))
+            num_cols = min(len(correlations), 4)  # Max 4 columns
+            corr_cols = st.columns(num_cols)
 
             for i, (metric, value) in enumerate(correlations.items()):
-                with corr_cols[i]:
-                    color = "🟢" if abs(value) > 0.5 else "🟡" if abs(value) > 0.3 else "⬜"
-                    st.metric(f"{color} {metric}", f"{value:.2f}")
+                with corr_cols[i % num_cols]:
+                    # Ensure value is numeric
+                    try:
+                        num_value = float(value) if value is not None else 0
+                        color = "🟢" if abs(num_value) > 0.5 else "🟡" if abs(num_value) > 0.3 else "⬜"
+                        st.metric(f"{color} {metric}", f"{num_value:.2f}")
+                    except (TypeError, ValueError):
+                        st.metric(f"⬜ {metric}", "N/A")
 
             leading_indicator = engagement.get('leading_indicator_detected', False)
             if leading_indicator:
