@@ -1030,11 +1030,11 @@ def render_diagnostics_tab(analysis_results):
                 cannibal_data = []
                 for item in cannibalized[:20]:  # Show top 20
                     cannibal_data.append({
-                        'Query': item['query'],
-                        'URLs Competing': item['url_count'],
-                        'Total Clicks': item['total_clicks'],
-                        'Top URL': item['urls'][0] if item['urls'] else 'N/A',
-                        'Impression Spread': f"{item.get('impression_spread', 0):.1f}%"
+                        'Query': item.get('query', 'N/A'),
+                        'URLs Competing': item.get('url_count', 0),
+                        'Total Clicks': item.get('total_clicks', 0),
+                        'Top URL': item.get('top_url', 'N/A'),
+                        'Severity': item.get('severity', 'unknown')
                     })
                 st.dataframe(pd.DataFrame(cannibal_data), use_container_width=True)
 
