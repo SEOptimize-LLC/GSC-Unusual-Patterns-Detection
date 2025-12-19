@@ -262,3 +262,178 @@ class GSCConnector:
             )
 
         return results
+
+    def fetch_query_page_data(
+        self,
+        site_url: str,
+        start_date: str,
+        end_date: str,
+        max_rows: int = None
+    ) -> pd.DataFrame:
+        """
+        Fetch data with both query and page dimensions for cannibalization analysis.
+
+        This allows detection of multiple URLs ranking for the same query.
+
+        Args:
+            site_url: The site URL to query
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            max_rows: Maximum rows to fetch
+
+        Returns:
+            DataFrame with query, page, and metrics
+        """
+        return self.fetch_data(
+            site_url=site_url,
+            start_date=start_date,
+            end_date=end_date,
+            dimensions=['query', 'page'],
+            max_rows=max_rows
+        )
+
+    def fetch_query_page_date_data(
+        self,
+        site_url: str,
+        start_date: str,
+        end_date: str,
+        max_rows: int = None
+    ) -> pd.DataFrame:
+        """
+        Fetch data with query, page, and date dimensions for URL volatility analysis.
+
+        This allows tracking which URL ranks for a query on each day.
+
+        Args:
+            site_url: The site URL to query
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            max_rows: Maximum rows to fetch
+
+        Returns:
+            DataFrame with date, query, page, and metrics
+        """
+        return self.fetch_data(
+            site_url=site_url,
+            start_date=start_date,
+            end_date=end_date,
+            dimensions=['date', 'query', 'page'],
+            max_rows=max_rows
+        )
+
+    def fetch_search_appearance_data(
+        self,
+        site_url: str,
+        start_date: str,
+        end_date: str,
+        max_rows: int = None
+    ) -> pd.DataFrame:
+        """
+        Fetch data segmented by search appearance (rich results).
+
+        Search appearances include:
+        - RICH_RESULTS: FAQ, How-to, Recipe, etc.
+        - VIDEO: Video results
+        - FEATURED_SNIPPET: Position 0
+        - SHOPPING_RESULTS: Product listings
+        - And more...
+
+        Args:
+            site_url: The site URL to query
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            max_rows: Maximum rows to fetch
+
+        Returns:
+            DataFrame with searchAppearance dimension and metrics
+        """
+        if not self.service:
+            return pd.DataFrame()
+
+        max_rows = max_rows or MAX_GSC_ROWS
+        all_data = []
+
+        request_body = {
+            'startDate': start_date,
+            'endDate': end_date,
+            'dimensions': ['searchAppearance'],
+            'rowLimit': min(25000, max_rows)
+        }
+
+        try:
+            response = self.service.searchanalytics().query(
+                siteUrl=site_url,
+                body=request_body
+            ).execute()
+
+            for row in response.get('rows', []):
+                all_data.append({
+                    'searchAppearance': row['keys'][0],
+                    'clicks': row.get('clicks', 0),
+                    'impressions': row.get('impressions', 0),
+                    'ctr': row.get('ctr', 0),
+                    'position': row.get('position', 0)
+                })
+
+        except Exception as e:
+            # Search appearance might not be available for all sites
+            pass
+
+        return pd.DataFrame(all_data)
+
+    def fetch_search_appearance_by_date(
+        self,
+        site_url: str,
+        start_date: str,
+        end_date: str,
+        max_rows: int = None
+    ) -> pd.DataFrame:
+        """
+        Fetch search appearance data over time.
+
+        Args:
+            site_url: The site URL to query
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            max_rows: Maximum rows to fetch
+
+        Returns:
+            DataFrame with date, searchAppearance, and metrics
+        """
+        if not self.service:
+            return pd.DataFrame()
+
+        max_rows = max_rows or MAX_GSC_ROWS
+        all_data = []
+
+        request_body = {
+            'startDate': start_date,
+            'endDate': end_date,
+            'dimensions': ['date', 'searchAppearance'],
+            'rowLimit': min(25000, max_rows)
+        }
+
+        try:
+            response = self.service.searchanalytics().query(
+                siteUrl=site_url,
+                body=request_body
+            ).execute()
+
+            for row in response.get('rows', []):
+                all_data.append({
+                    'date': row['keys'][0],
+                    'searchAppearance': row['keys'][1],
+                    'clicks': row.get('clicks', 0),
+                    'impressions': row.get('impressions', 0),
+                    'ctr': row.get('ctr', 0),
+                    'position': row.get('position', 0)
+                })
+
+        except Exception as e:
+            pass
+
+        df = pd.DataFrame(all_data)
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'])
+
+        return df
