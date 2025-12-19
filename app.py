@@ -1092,12 +1092,13 @@ def render_diagnostics_tab(analysis_results):
     elif engagement.get('status') not in ['no_data', 'unknown']:
         correlations = engagement.get('correlations', {})
 
-        if correlations:
+        if correlations and len(correlations) > 0:
             st.markdown("**Correlation between GA4 Engagement and GSC Position:**")
-            corr_cols = st.columns(len(correlations))
+            num_cols = min(len(correlations), 4)  # Max 4 columns
+            corr_cols = st.columns(num_cols)
 
             for i, (metric, value) in enumerate(correlations.items()):
-                with corr_cols[i]:
+                with corr_cols[i % num_cols]:
                     # Ensure value is numeric
                     try:
                         num_value = float(value) if value is not None else 0
