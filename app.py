@@ -404,14 +404,19 @@ def run_analysis(data, config):
     # Seasonality Analysis
     if data.get('gsc_yoy'):
         analyzer = SeasonalityAnalyzer()
-        yoy_aligned = analyzer.align_yoy_data(
-            data['gsc_yoy']['current'],
-            data['gsc_yoy']['previous']
-        )
-        yoy_metrics = analyzer.calculate_yoy_metrics(
-            data['gsc_yoy']['current'],
-            data['gsc_yoy']['previous']
-        )
+        gsc_yoy = data['gsc_yoy']
+        current_yoy = gsc_yoy.get('current', pd.DataFrame())
+        previous_yoy = gsc_yoy.get('previous', pd.DataFrame())
+
+        # Only proceed if both dataframes have data and required columns
+        if (not current_yoy.empty and not previous_yoy.empty and
+            'date' in current_yoy.columns and 'date' in previous_yoy.columns):
+            yoy_aligned = analyzer.align_yoy_data(current_yoy, previous_yoy)
+            yoy_metrics = analyzer.calculate_yoy_metrics(current_yoy, previous_yoy)
+        else:
+            yoy_aligned = pd.DataFrame()
+            yoy_metrics = {}
+
         patterns = analyzer.detect_seasonal_patterns(daily_data)
         results['seasonality'] = {
             'yoy_aligned': yoy_aligned,
