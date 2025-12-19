@@ -41,7 +41,9 @@ class GSCConnector:
 
         try:
             sites = self.service.sites().list().execute()
-            return [site['siteUrl'] for site in sites.get('siteEntry', [])]
+            site_urls = [site['siteUrl'] for site in sites.get('siteEntry', [])]
+            # Sort to ensure consistent ordering across API calls
+            return sorted(site_urls)
         except HttpError as e:
             st.error(f"HTTP Error getting sites: {e}")
             return []
