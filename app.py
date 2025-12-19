@@ -118,22 +118,30 @@ def render_sidebar(credentials):
         # Data source selection
         st.subheader("📊 Data Sources")
 
-        # GSC Configuration
-        gsc_connector = GSCConnector(credentials)
-        sites = gsc_connector.get_verified_sites()
+        # GSC Configuration - cache sites in session state to avoid repeated API calls
+        if 'available_sites' not in st.session_state:
+            gsc_connector = GSCConnector(credentials)
+            st.session_state['available_sites'] = gsc_connector.get_verified_sites()
+
+        sites = st.session_state['available_sites']
 
         if sites:
-            # Initialize session state for the selectbox if not set or if current value is invalid
-            if 'gsc_site_select' not in st.session_state:
-                st.session_state['gsc_site_select'] = sites[0]
-            elif st.session_state['gsc_site_select'] not in sites:
-                st.session_state['gsc_site_select'] = sites[0]
+            # Get previously selected site or default to first
+            previously_selected = st.session_state.get('selected_site_value', sites[0])
+            if previously_selected not in sites:
+                previously_selected = sites[0]
+
+            # Find the index of the previously selected site
+            default_idx = sites.index(previously_selected) if previously_selected in sites else 0
 
             selected_site = st.selectbox(
                 "🔍 GSC Property",
                 sites,
-                key="gsc_site_select"
+                index=default_idx
             )
+
+            # Store the selected value (not using widget key to avoid conflicts)
+            st.session_state['selected_site_value'] = selected_site
         else:
             st.warning("No GSC sites found")
             selected_site = None
