@@ -392,7 +392,8 @@ def run_analysis(data, config):
     # Segmentation
     if not query_data.empty:
         segmenter = DataSegmenter()
-        segmented = segmenter.apply_all_segmentations(query_data)
+        brand_terms = st.session_state.get('brand_terms', [])
+        segmented = segmenter.apply_all_segmentations(query_data, brand_terms=brand_terms)
         results['segments'] = {
             'data': segmented,
             'by_intent': segmenter.get_segment_summary(segmented, 'search_intent') if 'search_intent' in segmented.columns else None,

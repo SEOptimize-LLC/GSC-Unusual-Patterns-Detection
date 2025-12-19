@@ -20,23 +20,86 @@ class DataSegmenter:
     - Query clusters
     """
 
-    # Search intent patterns
+    # Expanded search intent patterns for better classification
     INTENT_PATTERNS = {
         'informational': [
-            r'\b(what|how|why|when|where|who|which|guide|tutorial|tips|learn|understand)\b',
-            r'\b(definition|meaning|example|explain|difference|vs|compare)\b'
+            # Question words
+            r'\b(what|how|why|when|where|who|which|whose|whom)\b',
+            # Learning/education
+            r'\b(guide|tutorial|tips|learn|understand|explain|explained|meaning|definition)\b',
+            r'\b(course|training|lesson|education|teach|teaching|instructions)\b',
+            # Comparison/research
+            r'\b(difference|differences|between|compare|comparison|vs|versus)\b',
+            # Examples and explanations
+            r'\b(example|examples|sample|samples|template|templates)\b',
+            r'\b(ideas|inspiration|ways to|steps to|how to)\b',
+            # Facts and info
+            r'\b(facts|benefits|advantages|disadvantages|pros|cons|features)\b',
+            r'\b(history|overview|introduction|basics|beginner|beginners)\b',
+            r'\b(cause|causes|reason|reasons|effect|effects|impact)\b',
+            # DIY and solutions
+            r'\b(diy|homemade|make your own|fix|fixing|solve|solving|solution)\b',
+            r'\b(recipe|recipes|calculator|converter|tool)\b',
+            # Question patterns
+            r'^(is|are|can|does|do|will|should|could|would|has|have|was|were)\s',
+            r'\?$'
         ],
         'navigational': [
-            r'\b(login|sign in|signin|account|dashboard|portal|official)\b',
-            r'\b(website|site|page|home|contact)\b'
+            # Login/account
+            r'\b(login|log in|signin|sign in|logout|sign out|account|my account)\b',
+            r'\b(dashboard|portal|admin|panel|console)\b',
+            # Official/direct
+            r'\b(official|website|site|homepage|home page|webpage)\b',
+            r'\b(contact|contact us|about|about us|location|directions|address)\b',
+            # Support
+            r'\b(support|help|customer service|phone number|email|hours)\b',
+            r'\b(faq|faqs|help center|knowledge base)\b',
+            # App/platform specific
+            r'\b(app|application|download app|mobile app|ios|android)\b',
+            # Near me / local
+            r'\b(near me|nearby|closest|nearest|local|locations)\b',
+            # Brand + product direct searches (short queries)
+            r'^[a-z]+ (login|account|support|contact|app)$'
         ],
         'transactional': [
-            r'\b(buy|purchase|order|shop|price|cost|cheap|discount|deal|coupon)\b',
-            r'\b(free|download|subscribe|register|signup|sign up|trial)\b'
+            # Purchase intent
+            r'\b(buy|purchase|order|shop|shopping|add to cart|checkout)\b',
+            r'\b(price|pricing|cost|costs|fee|fees|rate|rates|quote)\b',
+            # Deals and savings
+            r'\b(cheap|cheapest|affordable|budget|inexpensive|low cost)\b',
+            r'\b(discount|discounts|coupon|coupons|promo|promo code|deal|deals|sale|sales|offer|offers)\b',
+            r'\b(free shipping|fast shipping|same day|next day delivery)\b',
+            # Subscription/signup
+            r'\b(subscribe|subscription|register|registration|signup|sign up|join)\b',
+            r'\b(trial|free trial|demo|get started|start now|try)\b',
+            # Download/get
+            r'\b(download|downloads|free download|get|install)\b',
+            # Booking/reservation
+            r'\b(book|booking|reserve|reservation|schedule|appointment)\b',
+            # Hire/services
+            r'\b(hire|hiring|services|service|contractor|agency|company)\b',
+            # For sale
+            r'\b(for sale|on sale|clearance|outlet|wholesale)\b'
         ],
         'commercial': [
-            r'\b(best|top|review|comparison|vs|versus|alternative)\b',
-            r'\b(recommended|rating|rank|list)\b'
+            # Comparison shopping
+            r'\b(best|top|top 10|top 5|most popular|popular|leading)\b',
+            r'\b(review|reviews|rating|ratings|rated|recommended|recommendation)\b',
+            r'\b(comparison|compare|vs|versus|or|better|worse)\b',
+            # Alternatives
+            r'\b(alternative|alternatives|similar|like|competitor|competitors)\b',
+            # Rankings/lists
+            r'\b(ranking|rankings|rank|ranked|list|winners|award|awards)\b',
+            # Quality assessment
+            r'\b(quality|reliable|reliability|worth|value|legit|legitimate|scam|safe)\b',
+            r'\b(honest|truthful|real|genuine|authentic|trusted)\b',
+            # Year-specific (looking for latest)
+            r'\b(2024|2025|latest|newest|updated|new|current)\b',
+            # Specific product research
+            r'\b(specs|specifications|features|compatibility|requirements)\b',
+            r'\b(size|sizes|dimensions|weight|color|colors|model|models|version)\b',
+            # Pros/cons
+            r'\b(pros and cons|advantages|disadvantages|benefits|drawbacks)\b'
         ]
     }
 
@@ -137,7 +200,8 @@ class DataSegmenter:
     def segment_by_intent(
         self,
         df: pd.DataFrame,
-        query_col: str = 'query'
+        query_col: str = 'query',
+        brand_terms: List[str] = None
     ) -> pd.DataFrame:
         """
         Segment queries by search intent
@@ -145,6 +209,7 @@ class DataSegmenter:
         Args:
             df: DataFrame with query column
             query_col: Name of query column
+            brand_terms: Optional list of brand terms for better classification
 
         Returns:
             DataFrame with intent classification
@@ -154,17 +219,47 @@ class DataSegmenter:
         if query_col not in df.columns:
             return df
 
-        def classify_intent(query):
-            query = str(query).lower()
+        # Compile brand patterns if provided
+        brand_patterns = []
+        if brand_terms:
+            brand_patterns = [re.compile(re.escape(term), re.IGNORECASE) for term in brand_terms]
 
+        def classify_intent(query):
+            query_str = str(query).lower().strip()
+            word_count = len(query_str.split())
+
+            # Calculate scores for each intent
             scores = {}
             for intent, patterns in self.intent_patterns.items():
-                scores[intent] = sum(1 for p in patterns if p.search(query))
+                scores[intent] = sum(1 for p in patterns if p.search(query_str))
 
-            if max(scores.values()) == 0:
-                return 'unknown'
+            max_score = max(scores.values())
 
-            return max(scores, key=scores.get)
+            # If we found a clear match, use it
+            if max_score > 0:
+                return max(scores, key=scores.get)
+
+            # Smart fallback for unmatched queries
+            # Check if it's a branded query (navigational)
+            if brand_patterns:
+                for pattern in brand_patterns:
+                    if pattern.search(query_str):
+                        return 'navigational'
+
+            # Heuristics based on query structure
+            # Very short queries (1-2 words) without modifiers are usually navigational
+            # (people searching for a specific brand, product, or website)
+            if word_count <= 2:
+                return 'navigational'
+
+            # Medium length queries (3-4 words) without intent words
+            # are often commercial investigation
+            if word_count <= 4:
+                return 'commercial'
+
+            # Longer queries without clear intent are usually informational
+            # (people asking questions or looking for specific info)
+            return 'informational'
 
         df['search_intent'] = df[query_col].apply(classify_intent)
 
@@ -354,7 +449,8 @@ class DataSegmenter:
         self,
         df: pd.DataFrame,
         query_col: str = 'query',
-        url_col: str = 'page'
+        url_col: str = 'page',
+        brand_terms: List[str] = None
     ) -> pd.DataFrame:
         """
         Apply all available segmentations to the DataFrame
@@ -363,6 +459,7 @@ class DataSegmenter:
             df: Input DataFrame
             query_col: Query column name
             url_col: URL column name
+            brand_terms: Optional brand terms for better intent classification
 
         Returns:
             DataFrame with all segmentations applied
@@ -370,7 +467,7 @@ class DataSegmenter:
         result = df.copy()
 
         if query_col in result.columns:
-            result = self.segment_by_intent(result, query_col)
+            result = self.segment_by_intent(result, query_col, brand_terms)
             result = self.segment_by_query_length(result, query_col)
 
         if url_col in result.columns:
