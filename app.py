@@ -123,9 +123,15 @@ def render_sidebar(credentials):
         sites = gsc_connector.get_verified_sites()
 
         if sites:
+            # Use session state to persist selection across reruns
+            default_index = 0
+            if 'selected_site' in st.session_state and st.session_state['selected_site'] in sites:
+                default_index = sites.index(st.session_state['selected_site'])
+
             selected_site = st.selectbox(
                 "🔍 GSC Property",
                 sites,
+                index=default_index,
                 key="gsc_site_select"
             )
             st.session_state['selected_site'] = selected_site
@@ -251,6 +257,12 @@ def fetch_data(credentials, config):
         with st.spinner("Fetching GSC data..."):
             gsc_connector = GSCConnector(credentials)
 
+            # Debug: Show what we're fetching
+            with st.expander("🔍 Debug: Data Fetch Parameters", expanded=False):
+                st.write(f"**Property:** {config['selected_site']}")
+                st.write(f"**Date Range:** {start_str} to {end_str}")
+                st.write(f"**Search Type:** web (default)")
+
             # Main data with query dimension
             gsc_query_data = gsc_connector.fetch_data_by_date_range(
                 site_url=config['selected_site'],
@@ -268,6 +280,15 @@ def fetch_data(credentials, config):
                 dimensions=[],
                 max_rows=25000
             )
+
+            # Debug: Show raw data stats
+            with st.expander("🔍 Debug: Raw Data Stats", expanded=False):
+                st.write(f"**Query data rows:** {len(gsc_query_data)}")
+                st.write(f"**Daily data rows:** {len(gsc_daily_data)}")
+                if not gsc_daily_data.empty:
+                    st.write(f"**Daily data columns:** {list(gsc_daily_data.columns)}")
+                    st.write(f"**Daily clicks sum:** {gsc_daily_data['clicks'].sum() if 'clicks' in gsc_daily_data.columns else 'N/A'}")
+                    st.write(f"**Daily impressions sum:** {gsc_daily_data['impressions'].sum() if 'impressions' in gsc_daily_data.columns else 'N/A'}")
 
             results['gsc_data'] = {
                 'by_query': gsc_query_data,
