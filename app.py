@@ -920,14 +920,26 @@ def render_diagnostics_tab(analysis_results):
 
     # Health Score Card
     st.markdown("#### 🏥 Data Health Score")
-    health_score = summary.get('health_score', 0)
+    health_score_data = summary.get('health_score', {})
+    # Handle both dict format and legacy number format
+    if isinstance(health_score_data, dict):
+        health_score = health_score_data.get('score', 0)
+    else:
+        health_score = health_score_data if health_score_data is not None else 0
+
+    # Ensure health_score is a number
+    try:
+        health_score = float(health_score)
+    except (TypeError, ValueError):
+        health_score = 0
+
     health_color = "🟢" if health_score >= 80 else "🟡" if health_score >= 60 else "🔴"
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.metric(
             f"{health_color} Overall Health Score",
-            f"{health_score}/100",
+            f"{int(health_score)}/100",
             help="Based on dark search rate, CTR stability, cannibalization issues, and search appearances"
         )
 
@@ -960,9 +972,9 @@ def render_diagnostics_tab(analysis_results):
         with col1:
             st.metric("Total Clicks", format_number(dark_search.get('total_clicks', 0)))
         with col2:
-            st.metric("Query-Attributed Clicks", format_number(dark_search.get('query_clicks', 0)))
+            st.metric("Query-Attributed Clicks", format_number(dark_search.get('query_level_clicks', dark_search.get('query_clicks', 0))))
         with col3:
-            dark_rate = dark_search.get('dark_search_rate', 0)
+            dark_rate = dark_search.get('dark_search_percentage', dark_search.get('dark_search_rate', 0))
             st.metric(
                 "Dark Search Rate",
                 f"{dark_rate:.1f}%",
