@@ -123,18 +123,17 @@ def render_sidebar(credentials):
         sites = gsc_connector.get_verified_sites()
 
         if sites:
-            # Use session state to persist selection across reruns
-            default_index = 0
-            if 'selected_site' in st.session_state and st.session_state['selected_site'] in sites:
-                default_index = sites.index(st.session_state['selected_site'])
+            # Initialize session state for the selectbox if not set or if current value is invalid
+            if 'gsc_site_select' not in st.session_state:
+                st.session_state['gsc_site_select'] = sites[0]
+            elif st.session_state['gsc_site_select'] not in sites:
+                st.session_state['gsc_site_select'] = sites[0]
 
             selected_site = st.selectbox(
                 "🔍 GSC Property",
                 sites,
-                index=default_index,
                 key="gsc_site_select"
             )
-            st.session_state['selected_site'] = selected_site
         else:
             st.warning("No GSC sites found")
             selected_site = None
