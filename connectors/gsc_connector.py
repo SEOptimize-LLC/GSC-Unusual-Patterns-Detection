@@ -77,7 +77,10 @@ class GSCConnector:
         if not self.service:
             return pd.DataFrame()
 
-        dimensions = dimensions or ['date', 'query']
+        # Handle dimensions - None means use default, empty list means no dimensions (aggregated)
+        if dimensions is None:
+            dimensions = ['date', 'query']
+        # Empty list is intentional - means aggregated totals
         max_rows = max_rows or MAX_GSC_ROWS
 
         all_data = []
