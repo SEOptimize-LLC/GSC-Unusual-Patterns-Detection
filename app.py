@@ -25,6 +25,7 @@ from analysis.anomaly_detection import AnomalyDetector
 from analysis.brand_classifier import BrandClassifier
 from analysis.seasonality import SeasonalityAnalyzer
 from analysis.segmentation import DataSegmenter
+from analysis.diagnostics import DiagnosticAnalyzer
 from ai.openrouter import AIAnalyzer
 from visualization.charts import ChartBuilder
 from utils.helpers import DataProcessor, format_number, format_percentage, format_change
@@ -283,6 +284,35 @@ def fetch_data(credentials, config):
                 )
                 results['gsc_yoy'] = yoy_data
 
+            # Diagnostic data: Query+Page for cannibalization detection
+            with st.spinner("Fetching diagnostic data..."):
+                query_page_data = gsc_connector.fetch_query_page_data(
+                    site_url=config['selected_site'],
+                    start_date=start_str,
+                    end_date=end_str,
+                    max_rows=10000
+                )
+                results['gsc_data']['query_page'] = query_page_data
+
+                # Search Appearance data
+                search_appearance = gsc_connector.fetch_search_appearance_data(
+                    site_url=config['selected_site'],
+                    start_date=start_str,
+                    end_date=end_str
+                )
+                results['gsc_data']['search_appearance'] = search_appearance
+
+                # Previous period search appearance for comparison
+                if config['include_yoy']:
+                    prev_start = (datetime.strptime(start_str, '%Y-%m-%d') - timedelta(days=365)).strftime('%Y-%m-%d')
+                    prev_end = (datetime.strptime(end_str, '%Y-%m-%d') - timedelta(days=365)).strftime('%Y-%m-%d')
+                    prev_search_appearance = gsc_connector.fetch_search_appearance_data(
+                        site_url=config['selected_site'],
+                        start_date=prev_start,
+                        end_date=prev_end
+                    )
+                    results['gsc_data']['search_appearance_previous'] = prev_search_appearance
+
     # Fetch GA4 data
     if config['use_ga4'] and st.session_state.get('selected_ga4_property'):
         with st.spinner("Fetching GA4 data..."):
@@ -399,6 +429,50 @@ def run_analysis(data, config):
             'by_intent': segmenter.get_segment_summary(segmented, 'search_intent') if 'search_intent' in segmented.columns else None,
             'by_length': segmenter.get_segment_summary(segmented, 'query_length_type') if 'query_length_type' in segmented.columns else None
         }
+
+    # Advanced Diagnostics
+    diagnostics = DiagnosticAnalyzer()
+    diag_results = {}
+
+    # 1. Dark Search Calculator
+    total_clicks = daily_data['clicks'].sum() if 'clicks' in daily_data.columns else 0
+    query_clicks = query_data['clicks'].sum() if not query_data.empty and 'clicks' in query_data.columns else 0
+    diag_results['dark_search'] = diagnostics.calculate_dark_search(total_clicks, query_clicks)
+
+    # 2. CTR vs Position Divergence
+    diag_results['ctr_divergence'] = diagnostics.detect_ctr_position_divergence(daily_data)
+
+    # 3. URL Cannibalization
+    query_page_data = gsc_data.get('query_page', pd.DataFrame())
+    if not query_page_data.empty:
+        diag_results['cannibalization'] = diagnostics.detect_url_cannibalization(query_page_data)
+    else:
+        diag_results['cannibalization'] = {'status': 'no_data', 'cannibalized_queries': []}
+
+    # 4. Engagement Leading Indicator (if GA4 data available)
+    ga4_data = data.get('ga4_data', {}).get('organic', pd.DataFrame())
+    if not ga4_data.empty and not daily_data.empty:
+        diag_results['engagement'] = diagnostics.analyze_engagement_leading_indicator(daily_data, ga4_data)
+    else:
+        diag_results['engagement'] = {'status': 'no_ga4_data', 'correlations': {}}
+
+    # 5. Search Appearance Analysis
+    search_appearance = gsc_data.get('search_appearance', pd.DataFrame())
+    search_appearance_prev = gsc_data.get('search_appearance_previous', pd.DataFrame())
+    diag_results['search_appearance'] = diagnostics.analyze_search_appearance(
+        search_appearance, search_appearance_prev
+    )
+
+    # Generate diagnostic summary
+    diag_results['summary'] = diagnostics.generate_diagnostic_summary(
+        diag_results['dark_search'],
+        diag_results['ctr_divergence'],
+        diag_results['cannibalization'],
+        diag_results['engagement'],
+        diag_results['search_appearance']
+    )
+
+    results['diagnostics'] = diag_results
 
     return results
 
@@ -832,6 +906,215 @@ def render_data_tab(data):
             st.info("No query data available")
 
 
+def render_diagnostics_tab(analysis_results):
+    """Render the advanced diagnostics tab"""
+    st.markdown('<div class="section-header">🔬 Advanced Diagnostics</div>', unsafe_allow_html=True)
+
+    diagnostics = analysis_results.get('diagnostics', {})
+
+    if not diagnostics:
+        st.warning("No diagnostic data available. Fetch data with diagnostics enabled.")
+        return
+
+    summary = diagnostics.get('summary', {})
+
+    # Health Score Card
+    st.markdown("#### 🏥 Data Health Score")
+    health_score = summary.get('health_score', 0)
+    health_color = "🟢" if health_score >= 80 else "🟡" if health_score >= 60 else "🔴"
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.metric(
+            f"{health_color} Overall Health Score",
+            f"{health_score}/100",
+            help="Based on dark search rate, CTR stability, cannibalization issues, and search appearances"
+        )
+
+    # Show status indicators
+    st.markdown("#### Status Indicators")
+    status_cols = st.columns(5)
+
+    indicators = [
+        ("Dark Search", diagnostics.get('dark_search', {}).get('status', 'unknown')),
+        ("CTR Stability", diagnostics.get('ctr_divergence', {}).get('status', 'unknown')),
+        ("Cannibalization", diagnostics.get('cannibalization', {}).get('status', 'unknown')),
+        ("Engagement", diagnostics.get('engagement', {}).get('status', 'unknown')),
+        ("Rich Results", diagnostics.get('search_appearance', {}).get('status', 'unknown'))
+    ]
+
+    status_emoji = {'healthy': '✅', 'warning': '⚠️', 'critical': '🔴', 'no_data': '⬜', 'unknown': '❓', 'no_ga4_data': '⬜'}
+
+    for i, (name, status) in enumerate(indicators):
+        with status_cols[i]:
+            st.metric(name, status_emoji.get(status, '❓'))
+
+    st.markdown("---")
+
+    # 1. Dark Search Analysis
+    st.markdown("#### 🔍 Dark Search Analysis")
+    dark_search = diagnostics.get('dark_search', {})
+
+    if dark_search.get('status') != 'no_data':
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Clicks", format_number(dark_search.get('total_clicks', 0)))
+        with col2:
+            st.metric("Query-Attributed Clicks", format_number(dark_search.get('query_clicks', 0)))
+        with col3:
+            dark_rate = dark_search.get('dark_search_rate', 0)
+            st.metric(
+                "Dark Search Rate",
+                f"{dark_rate:.1f}%",
+                help="Percentage of clicks not attributed to specific queries"
+            )
+
+        if dark_rate > 30:
+            st.warning(f"⚠️ High dark search rate ({dark_rate:.1f}%). A significant portion of traffic cannot be attributed to specific queries. This is common for sites with high branded search.")
+        elif dark_rate > 15:
+            st.info(f"ℹ️ Moderate dark search rate ({dark_rate:.1f}%). Some traffic is hidden, but this is within normal ranges.")
+        else:
+            st.success(f"✅ Low dark search rate ({dark_rate:.1f}%). Most traffic is properly attributed.")
+    else:
+        st.info("Dark search data not available")
+
+    st.markdown("---")
+
+    # 2. CTR vs Position Divergence
+    st.markdown("#### 📊 CTR vs Position Divergence")
+    ctr_div = diagnostics.get('ctr_divergence', {})
+
+    if ctr_div.get('status') not in ['no_data', 'unknown']:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Divergence Score", f"{ctr_div.get('divergence_score', 0):.2f}")
+        with col2:
+            st.metric("Correlation", f"{ctr_div.get('correlation', 0):.2f}")
+
+        divergent_days = ctr_div.get('divergent_days', [])
+        if divergent_days:
+            st.warning(f"⚠️ Found {len(divergent_days)} days with CTR/Position divergence - position improved but CTR dropped (or vice versa). This could indicate SERP feature changes or click-through behavior shifts.")
+            with st.expander("View Divergent Days"):
+                st.dataframe(pd.DataFrame(divergent_days), use_container_width=True)
+        else:
+            st.success("✅ No significant CTR/Position divergence detected. Rankings and CTR are moving together as expected.")
+    else:
+        st.info("CTR divergence analysis requires time-series data")
+
+    st.markdown("---")
+
+    # 3. URL Cannibalization
+    st.markdown("#### 🔄 URL Cannibalization Detection")
+    cannibal = diagnostics.get('cannibalization', {})
+
+    if cannibal.get('status') not in ['no_data', 'unknown']:
+        cannibalized = cannibal.get('cannibalized_queries', [])
+
+        if cannibalized:
+            st.warning(f"⚠️ Found {len(cannibalized)} queries with potential cannibalization (multiple URLs competing)")
+
+            # Show top cannibalized queries
+            with st.expander(f"View Cannibalized Queries ({len(cannibalized)})"):
+                cannibal_data = []
+                for item in cannibalized[:20]:  # Show top 20
+                    cannibal_data.append({
+                        'Query': item['query'],
+                        'URLs Competing': item['url_count'],
+                        'Total Clicks': item['total_clicks'],
+                        'Top URL': item['urls'][0] if item['urls'] else 'N/A',
+                        'Impression Spread': f"{item.get('impression_spread', 0):.1f}%"
+                    })
+                st.dataframe(pd.DataFrame(cannibal_data), use_container_width=True)
+
+            st.info("💡 **Recommendation**: Consider consolidating content for these queries or using canonical tags to indicate the preferred URL.")
+        else:
+            st.success("✅ No significant URL cannibalization detected. URLs are well-differentiated for their target queries.")
+    else:
+        st.info("Cannibalization analysis requires query+page data")
+
+    st.markdown("---")
+
+    # 4. Engagement Leading Indicator
+    st.markdown("#### 📈 Engagement Leading Indicator")
+    engagement = diagnostics.get('engagement', {})
+
+    if engagement.get('status') == 'no_ga4_data':
+        st.info("Enable GA4 integration to analyze engagement as a leading indicator for rankings")
+    elif engagement.get('status') not in ['no_data', 'unknown']:
+        correlations = engagement.get('correlations', {})
+
+        if correlations:
+            st.markdown("**Correlation between GA4 Engagement and GSC Position:**")
+            corr_cols = st.columns(len(correlations))
+
+            for i, (metric, value) in enumerate(correlations.items()):
+                with corr_cols[i]:
+                    color = "🟢" if abs(value) > 0.5 else "🟡" if abs(value) > 0.3 else "⬜"
+                    st.metric(f"{color} {metric}", f"{value:.2f}")
+
+            leading_indicator = engagement.get('leading_indicator_detected', False)
+            if leading_indicator:
+                st.success("✅ Engagement metrics appear to be a leading indicator for rankings. Improving user engagement may help improve positions.")
+            else:
+                st.info("ℹ️ No strong leading indicator relationship detected between engagement and rankings.")
+    else:
+        st.info("Engagement analysis not available")
+
+    st.markdown("---")
+
+    # 5. Search Appearance Analysis
+    st.markdown("#### ✨ Search Appearance (Rich Results)")
+    search_app = diagnostics.get('search_appearance', {})
+
+    if search_app.get('status') not in ['no_data', 'unknown']:
+        current_appearances = search_app.get('current', {})
+        changes = search_app.get('changes', [])
+
+        if current_appearances:
+            st.markdown("**Current Search Appearances:**")
+            app_cols = st.columns(min(4, len(current_appearances)) or 1)
+
+            for i, (appearance, metrics) in enumerate(list(current_appearances.items())[:4]):
+                with app_cols[i % 4]:
+                    st.metric(
+                        appearance.replace('_', ' ').title(),
+                        format_number(metrics.get('clicks', 0)),
+                        f"{metrics.get('impressions', 0):,.0f} imp"
+                    )
+
+        if changes:
+            st.markdown("**Year-over-Year Changes:**")
+            changes_df = pd.DataFrame(changes)
+            if not changes_df.empty:
+                # Color code changes
+                st.dataframe(changes_df, use_container_width=True)
+
+                gains = [c for c in changes if c.get('change', 0) > 0]
+                losses = [c for c in changes if c.get('change', 0) < 0]
+
+                if gains:
+                    st.success(f"📈 Gained visibility in: {', '.join([g['appearance'] for g in gains])}")
+                if losses:
+                    st.warning(f"📉 Lost visibility in: {', '.join([l['appearance'] for l in losses])}")
+        else:
+            st.info("No year-over-year search appearance data available for comparison")
+    else:
+        st.info("Search appearance data not available for this property")
+
+    # Summary recommendations
+    st.markdown("---")
+    st.markdown("#### 💡 Diagnostic Recommendations")
+
+    recommendations = summary.get('recommendations', [])
+    if recommendations:
+        for rec in recommendations:
+            priority = rec.get('priority', 'low')
+            icon = "🔴" if priority == 'high' else "🟡" if priority == 'medium' else "🟢"
+            st.markdown(f"{icon} **{rec.get('area', 'General')}**: {rec.get('message', '')}")
+    else:
+        st.success("✅ No critical issues detected. Your data appears healthy!")
+
+
 def main():
     """Main application entry point"""
     init_session_state()
@@ -884,6 +1167,7 @@ def main():
             "🏷️ Brand Analysis",
             "📈 Seasonality",
             "🧩 Segments",
+            "🔬 Diagnostics",
             "🤖 AI Insights",
             "📋 Data"
         ])
@@ -904,9 +1188,12 @@ def main():
             render_segments_tab(analysis_results)
 
         with tabs[5]:
-            render_ai_insights_tab(data, analysis_results, credentials)
+            render_diagnostics_tab(analysis_results)
 
         with tabs[6]:
+            render_ai_insights_tab(data, analysis_results, credentials)
+
+        with tabs[7]:
             render_data_tab(data)
 
     else:
