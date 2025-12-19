@@ -1098,8 +1098,13 @@ def render_diagnostics_tab(analysis_results):
 
             for i, (metric, value) in enumerate(correlations.items()):
                 with corr_cols[i]:
-                    color = "🟢" if abs(value) > 0.5 else "🟡" if abs(value) > 0.3 else "⬜"
-                    st.metric(f"{color} {metric}", f"{value:.2f}")
+                    # Ensure value is numeric
+                    try:
+                        num_value = float(value) if value is not None else 0
+                        color = "🟢" if abs(num_value) > 0.5 else "🟡" if abs(num_value) > 0.3 else "⬜"
+                        st.metric(f"{color} {metric}", f"{num_value:.2f}")
+                    except (TypeError, ValueError):
+                        st.metric(f"⬜ {metric}", "N/A")
 
             leading_indicator = engagement.get('leading_indicator_detected', False)
             if leading_indicator:
